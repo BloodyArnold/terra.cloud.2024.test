@@ -1,0 +1,145 @@
+https://terraform-provider.yandexcloud.net/Resources/compute_instance
+https://cloud.yandex.ru/ru/docs/compute/quickstart/quick-create-linux#create-vm
+https://github.com/terraform-yacloud-modules/terraform-yandex-instance/blob/main/README.md
+
+terraform {
+  required_providers {
+    yandex = {
+      source = "yandex-cloud/yandex"
+      version = "0.58.0"
+    }
+  }
+}
+
+provider "yandex" {
+  token     = token_id
+  cloud_id  = cloud_id
+  folder_id = folder_id
+}
+
+resource "yandex_compute_instance" "web1" {
+  name         = "web1"
+  description  = "Web Server 1"
+  zone         = "ru-central1-a"
+  platform_id  = "altlinux-10"
+  resources {
+    cores  = 1
+    memory = 1024
+  }
+  boot_disk {
+    size = 15
+    type = "network-hdd"
+  }
+  network_interface {
+    network_id = yandex_vpc_network.network.id
+  }
+  metadata = {
+    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  }
+}
+
+resource "yandex_compute_instance" "web2" {
+  name         = "web2"
+  description  = "Web Server 2"
+  zone         = "ru-central1-b"
+  platform_id  = "altlinux-10"
+  resources {
+    cores  = 1
+    memory = 1024
+  }
+  boot_disk {
+    size = 15
+    type = "network-hdd"
+  }
+  network_interface {
+    network_id = yandex_vpc_network.network.id
+  }
+  metadata = {
+    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  }
+}
+
+resource "yandex_compute_instance" "control" {
+  name         = "control-vm"
+  description  = "Control VM"
+  zone         = "ru-central1-a"
+  platform_id  = "altlinux-10"
+  resources {
+    cores  = 1
+    memory = 1024
+  }
+  boot_disk {
+    size = 15
+    type = "network-hdd"
+  }
+  network_interface {
+    network_id = yandex_vpc_network.network.id
+  }
+  metadata = {
+    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  }
+}
+
+resource "yandex_compute_instance" "lb" {
+  name         = "load-balancer"
+  description  = "Load Balancer"
+  zone         = "ru-central1-a"
+  platform_id  = "altlinux-10"
+  resources {
+    cores  = 1
+    memory = 1024
+  }
+  boot_disk {
+    size = 15
+    type = "network-hdd"
+  }
+  network_interface {
+    network_id = yandex_vpc_network.network.id
+  }
+  metadata = {
+    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  }
+}
+
+resource "yandex_lb_target_group" "web_target_group" {
+  name        = "web-target-group"
+  region      = "ru-central1"
+  target {
+    subnet_id      = yandex_vpc_network.network.subnets[0].id
+    address        = yandex_compute_instance.web1.network_interface[0].ipv4
+    healthcheck_id = yandex_lb_healthcheck.default.id
+  }
+  target {
+    subnet_id      = yandex_vpc_network.network.subnets[0].id
+    address        = yandex_compute_instance.web2.network_interface[0].ipv4
+    healthcheck_id = yandex_lb_healthcheck.default.id
+  }
+}
+
+resource "yandex_lb_network_load_balancer" "lb" {
+  name             = "network-load-balancer"
+  region           = "ru-central1"
+  target_group_id  = yandex_lb_target_group.web_target_group.id
+  listener {
+    name         = "http-listener"
+    port         = 80
+    external_ip_addresses = ["0.0.0.0"]
+  }
+  listener {
+    name         = "https-listener"
+    port         = 443
+    external_ip_addresses = ["0.0.0.0"]
+  }
+}
+
+resource "yandex_lb_http_router" "http_router" {
+  name                  = "http-router"
+  region                = "ru-central1"
+  target_group_id       = yandex_lb_target_group.web_target_group.id
+  action {
+    backend {
+      address   = yandex_compute_instance.web1.network_interface[0].ipv4
+      port      = 80
+    }
+  }
+}
