@@ -1,145 +1,253 @@
-https://terraform-provider.yandexcloud.net/Resources/compute_instance
-https://cloud.yandex.ru/ru/docs/compute/quickstart/quick-create-linux#create-vm
-https://github.com/terraform-yacloud-modules/terraform-yandex-instance/blob/main/README.md
 
+ Создаём рабочию директорию по пути "/home/altlinux/bin" и переходим в неё:
+
+mkdir ~/bin; cd ~/bin
+
+Создадим файл в каталоге пользователя, под которым мы работаем и будем запускать сценарий:
+документация от Яндекс
+
+vim ~/.terraformrc
+
+данное содержимое вставляем без изменений. По умолчанию, установка провайдера выполняется из репозитория hashicorp, однако, он может быть заблокирован на территории России, поэтому мы переопределяем путь по которому выполняются запрос
+
+provider_installation {
+  network_mirror {
+    url = "https://terraform-mirror.yandexcloud.net/"
+    include = ["registry.terraform.io/*/*"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/*/*"]
+  }
+}
+
+Создаём рабочию директорию по пути "/home/altlinux/bin" и переходим в неё:
+
+mkdir ~/bin; cd ~/bin
+
+Создадим файл variables.tf и опишем основные переменные которые потребуются:
+
+vim variables.tf
+
+содержимое:
+
+variable "token" {
+    type      = string
+    sensitive = true
+}
+
+variable "cloud_id" {
+    type      = string
+    sensitive = true
+}
+
+variable "folder_id" {
+    type      = string
+    sensitive = true
+}
+
+В файле main.tf - опишем конфигурацию для создания всех необходимых ресурсов:
+
+vim main.tf
+содержимое:
 terraform {
   required_providers {
     yandex = {
       source = "yandex-cloud/yandex"
-      version = "0.58.0"
     }
   }
+  required_version = ">= 0.13"
 }
 
 provider "yandex" {
-  token     = token_id
-  cloud_id  = cloud_id
-  folder_id = folder_id
+  token     = var.token
+  cloud_id  = var.cloud_id
+  folder_id = var.folder_id
 }
 
 resource "yandex_compute_instance" "web1" {
-  name         = "web1"
-  description  = "Web Server 1"
-  zone         = "ru-central1-a"
-  platform_id  = "altlinux-10"
+  name        = "web1"
+  hostname    = "web1"
+  platform_id = "standard-v1"
+  zone        = "ru-central1-a"
+
   resources {
-    cores  = 1
-    memory = 1024
+    cores  	  = 2
+    memory 	  = 1
+    core_fraction = 20
   }
+
   boot_disk {
-    size = 15
-    type = "network-hdd"
+    initialize_params {
+	image_id = "fd8i8fljrbbcclckhlm9"
+	size	 = 15
+	type	 = "network-hdd"
+    }
   }
+
   network_interface {
-    network_id = yandex_vpc_network.network.id
+    subnet_id  = "${yandex_vpc_subnet.subnet_web1.id}"
+    ip_address = "192.168.100.100"
+    nat	       = true
   }
+
   metadata = {
     ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  }
+
+  timeouts {
+    create="10m"
   }
 }
 
 resource "yandex_compute_instance" "web2" {
-  name         = "web2"
-  description  = "Web Server 2"
-  zone         = "ru-central1-b"
-  platform_id  = "altlinux-10"
+  name        = "web2"
+  hostname    = "web2"
+  platform_id = "standard-v1"
+  zone        = "ru-central1-b"
+
   resources {
-    cores  = 1
-    memory = 1024
+    cores  	  = 2
+    memory 	  = 1
+    core_fraction = 20
   }
+
   boot_disk {
-    size = 15
-    type = "network-hdd"
+    initialize_params {
+	image_id = "fd8i8fljrbbcclckhlm9"
+	size	 = 15
+	type	 = "network-hdd"
+    }
   }
+
   network_interface {
-    network_id = yandex_vpc_network.network.id
+    subnet_id          = "${yandex_vpc_subnet.subnet_web2.id}"
+    ip_address 	       = "192.168.200.100"
+    nat	               = true
   }
+
   metadata = {
     ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
   }
-}
 
-resource "yandex_compute_instance" "control" {
-  name         = "control-vm"
-  description  = "Control VM"
-  zone         = "ru-central1-a"
-  platform_id  = "altlinux-10"
-  resources {
-    cores  = 1
-    memory = 1024
-  }
-  boot_disk {
-    size = 15
-    type = "network-hdd"
-  }
-  network_interface {
-    network_id = yandex_vpc_network.network.id
-  }
-  metadata = {
-    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
+  timeouts {
+    create="10m"
   }
 }
 
-resource "yandex_compute_instance" "lb" {
-  name         = "load-balancer"
-  description  = "Load Balancer"
-  zone         = "ru-central1-a"
-  platform_id  = "altlinux-10"
-  resources {
-    cores  = 1
-    memory = 1024
-  }
-  boot_disk {
-    size = 15
-    type = "network-hdd"
-  }
-  network_interface {
-    network_id = yandex_vpc_network.network.id
-  }
-  metadata = {
-    ssh-keys = "altlinux:${file("~/.ssh/id_rsa.pub")}"
-  }
+resource "yandex_vpc_network" "network_web" {
+  name = "network_web"
 }
 
-resource "yandex_lb_target_group" "web_target_group" {
-  name        = "web-target-group"
-  region      = "ru-central1"
-  target {
-    subnet_id      = yandex_vpc_network.network.subnets[0].id
-    address        = yandex_compute_instance.web1.network_interface[0].ipv4
-    healthcheck_id = yandex_lb_healthcheck.default.id
-  }
-  target {
-    subnet_id      = yandex_vpc_network.network.subnets[0].id
-    address        = yandex_compute_instance.web2.network_interface[0].ipv4
-    healthcheck_id = yandex_lb_healthcheck.default.id
-  }
+resource "yandex_vpc_subnet" "subnet_web1" {
+  zone           = "ru-central1-a"
+  network_id     = "${yandex_vpc_network.network_web.id}"
+  v4_cidr_blocks = ["192.168.100.0/24"]
 }
 
-resource "yandex_lb_network_load_balancer" "lb" {
-  name             = "network-load-balancer"
-  region           = "ru-central1"
-  target_group_id  = yandex_lb_target_group.web_target_group.id
+resource "yandex_vpc_subnet" "subnet_web2" {
+  zone           = "ru-central1-b"
+  network_id     = "${yandex_vpc_network.network_web.id}"
+  v4_cidr_blocks = ["192.168.200.0/24"]
+}
+
+resource "yandex_lb_network_load_balancer" "lb-web" {
+  name = "lb-web"
+
   listener {
-    name         = "http-listener"
-    port         = 80
-    external_ip_addresses = ["0.0.0.0"]
+    name = "http"
+    port = 80
+    external_address_spec {
+      ip_version = "ipv4"
+    }
   }
-  listener {
-    name         = "https-listener"
-    port         = 443
-    external_ip_addresses = ["0.0.0.0"]
-  }
-}
 
-resource "yandex_lb_http_router" "http_router" {
-  name                  = "http-router"
-  region                = "ru-central1"
-  target_group_id       = yandex_lb_target_group.web_target_group.id
-  action {
-    backend {
-      address   = yandex_compute_instance.web1.network_interface[0].ipv4
-      port      = 80
+  listener {
+    name = "https"
+    port = 443
+    external_address_spec {
+      ip_version = "ipv4"
+    }
+  }
+
+  attached_target_group {
+    target_group_id = "${yandex_lb_target_group.lb-group.id}"
+
+    healthcheck {
+      name = "http"
+      http_options {
+        port = 80
+        path = "/"
+      }
     }
   }
 }
+
+resource "yandex_lb_target_group" "lb-group" {
+  name      = "lb-group"
+
+  target {
+    subnet_id = "${yandex_vpc_subnet.subnet_web1.id}"
+    address   = "${yandex_compute_instance.web1.network_interface.0.ip_address}"
+  }
+
+  target {
+    subnet_id = "${yandex_vpc_subnet.subnet_web2.id}"
+    address   = "${yandex_compute_instance.web2.network_interface.0.ip_address}"
+  }
+}
+
+output "lb_ip" {
+  value = yandex_lb_network_load_balancer.lb-web
+}
+
+Файл /home/altlinux/bin/cloud.conf используем для указания настроек для подключения к облачному провайдеру:
+
+vim cloud.conf
+
+содержимое:
+
+# Yandex Token
+export TF_VAR_token=<ВСТАВЛЯЕМ СОДЕРЖИМОЕ ДЛЯ ТЕКУЩЕГО АККАУНТА В YANDEX CLOUD>
+
+# Yandex Cloud ID
+export TF_VAR_cloud_id=<ВСТАВЛЯЕМ СОДЕРЖИМОЕ ДЛЯ ТЕКУЩЕГО АККАУНТА В YANDEX CLOUD>
+
+# Yandex Project ID
+export TF_VAR_folder_id=<ВСТАВЛЯЕМ СОДЕРЖИМОЕ ДЛЯ ТЕКУЩЕГО АККАУНТА В YANDEX CLOUD>
+
+Создаём файл cloudinit.sh для запуска всего вышеописанного:
+
+vim cloudinit.sh
+
+содержимое:
+
+#!/bin/bash
+
+cd /home/altlinux/bin
+source cloud.conf
+terraform init
+terraform apply -auto-approve
+terraform output | grep -E '"address" = "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' > /home/altlinux/lb.ip
+
+Задаём права на исполнение:
+
+chmod +x cloudinit.sh
+
+Задаём возможность скрипту cloudinit.sh выполняться из любой директории без явного указания пути к исполняемому файлу:
+
+export PATH=$PATH:/home/altlinux/bin
+
+Генерируем ssh-ключи:
+
+ssh-keygen -t rsa
+
+Выходим из текущего каталога /home/altlinux/bin в домашний каталог пользователя и пытаемся запустить скрипт:
+
+cd
+cloudinit.sh
+
+также в файл /home/altlinux/lb.ip сохранена информацию о внешнем IP-адресе 
+
+
+
+ 
